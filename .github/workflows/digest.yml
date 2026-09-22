@@ -33,7 +33,7 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           RUN_X_SOURCE: "false"
-        run: python main.py
+        run: python -u main.py
 
       - name: Commit updated site & dedupe store
         run: |
