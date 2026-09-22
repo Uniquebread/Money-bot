@@ -1,0 +1,44 @@
+name: Money Bot Digest (every 2 hours)
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot (free sources only - X is NOT run here, see x-digest.yml)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          RUN_X_SOURCE: "false"
+        run: python main.py
+
+      - name: Commit updated site & dedupe store
+        run: |
+          git config user.name "money-bot"
+          git config user.email "money-bot@users.noreply.github.com"
+          git add docs/ data/seen.json
+          git diff --quiet --cached || git commit -m "Digest update $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
