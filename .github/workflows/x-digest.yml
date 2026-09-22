@@ -30,7 +30,7 @@ jobs:
           TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
           X_MAX_POSTS_PER_RUN: "20"
           RUN_X_SOURCE: "true"
-        run: python run_x_only.py
+        run: python -u run_x_only.py
 
       - name: Commit updated site & dedupe store
         run: |
