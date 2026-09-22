@@ -27,10 +27,10 @@ def _chunk(text, max_len=MAX_LEN):
     chunks = []
     while len(text) > max_len:
         split_at = text.rfind("\n\n", 0, max_len)
-        if split_at == -1:
+        if split_at <= 0:
             split_at = max_len
         chunks.append(text[:split_at])
-        text = text[split_at:]
+        text = text[split_at:].lstrip("\n")
     if text:
         chunks.append(text)
     return chunks
