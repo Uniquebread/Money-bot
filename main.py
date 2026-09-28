@@ -1,15 +1,6 @@
 """
-Orchestrates one full run of the bot:
-  1. Fetch from every source (each capped at a hard timeout so a slow or
-     blocked source can never hang the whole run)
-  2. Score + categorize + filter for relevance
-  3. Drop anything already seen (dedupe store)
-  4. Build the Telegram message + website page
-  5. Send to Telegram (and email, if configured)
-  6. Write the website files and update the dedupe store on disk
-
+Orchestrates one full run of the bot.
 Run manually with:  python -u main.py
-The GitHub Actions workflows call this exact script on a schedule.
 """
 import os
 import sys
@@ -22,17 +13,10 @@ import filter as relevance_filter
 import digest
 from notifiers import telegram_notifier, emailer
 
-from sources import reddit_rss, google_news_rss, producthunt_rss, x_api
+from sources import reddit_rss, google_news_rss, producthunt_rss, telegram_channels, medium_rss
 
-# Sources that are always free to poll frequently.
-FREE_SOURCES = [reddit_rss, google_news_rss, producthunt_rss]
+SOURCES = [reddit_rss, google_news_rss, producthunt_rss, telegram_channels, medium_rss]
 
-# X is separate because it costs money per read - see sources/x_api.py.
-RUN_X_SOURCE = os.environ.get("RUN_X_SOURCE", "false").lower() == "true"
-
-# Hard cap per source, in seconds. If a source doesn't finish within this
-# window (slow network, a site throttling GitHub's IPs, etc.) it's skipped
-# for this run rather than hanging the whole job.
 SOURCE_TIMEOUT_SECONDS = 25
 
 
@@ -57,27 +41,23 @@ def run():
     print(f"=== Money Bot run started {run_time.isoformat()} ===", flush=True)
 
     all_items = []
-    for source_module in FREE_SOURCES:
+    for source_module in SOURCES:
         all_items.extend(fetch_with_timeout(source_module))
 
-    if RUN_X_SOURCE:
-        all_items.extend(fetch_with_timeout(x_api))
-    else:
-        print("[x_api] RUN_X_SOURCE is not 'true' - skipping (no cost incurred).", flush=True)
-
-    print(f"Total raw items fetched: {len(all_items)}", flush=True)
+    scanned_count = len(all_items)
+    print(f"Total raw items scanned: {scanned_count}", flush=True)
 
     all_items = [it for it in all_items if it.get("link") and it.get("title")]
 
     relevant = relevance_filter.filter_items(all_items, min_score=config.MIN_SCORE)
-    print(f"Relevant after keyword filter: {len(relevant)}", flush=True)
+    print(f"Passed strict genuine-opportunity filter: {len(relevant)} of {scanned_count} scanned", flush=True)
 
     seen = store.load()
     seen = store.prune(seen)
     new_items, seen = store.split_new_items(relevant, seen)
-    print(f"New (not previously seen): {len(new_items)}", flush=True)
+    print(f"New (not previously reported): {len(new_items)}", flush=True)
 
-    telegram_text = digest.build_telegram_message(new_items, run_time)
+    telegram_text = digest.build_telegram_message(new_items, run_time, scanned_count=scanned_count)
     website_html = digest.build_website_page(new_items, run_time, page_title="Latest Digest")
 
     telegram_notifier.send(telegram_text)
