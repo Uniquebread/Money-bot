@@ -1,4 +1,3 @@
-
 """
 Scores each item for whether it's a genuine, ACTIONABLE opportunity that
 someone is actually earning from - not just "mentions a related word,"
