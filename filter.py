@@ -1,11 +1,8 @@
+
 """
-Scores each item for whether it's a genuine, ACTIONABLE opportunity - not
-just "mentions a related word." This is the free (no-AI) replacement for
-LLM-based genuine/scam classification: it requires multiple concrete
-signals to line up together, and it aggressively penalizes known scam
-patterns, rather than matching on single generic keywords like the old
-version did (which is why it kept surfacing news ARTICLES about airdrops
-instead of actual claimable airdrops).
+Scores each item for whether it's a genuine, ACTIONABLE opportunity that
+someone is actually earning from - not just "mentions a related word,"
+not a discussion/question post, and not betting/gambling.
 
 No single approach without an LLM will be perfect - treat this as a
 much stronger noise filter, not a scam guarantee. Always verify manually
@@ -31,6 +28,14 @@ ACTION_PHRASES = [
     "deposit bonus", "welcome bonus of", "cashback of",
 ]
 
+EARNING_PROOF_PHRASES = [
+    "i earned", "i made $", "i got paid", "i received", "just received",
+    "just got paid", "cashed out", "payout received", "earned $",
+    "made an extra $", "verified payment", "payment proof", "withdrawal proof",
+    "successfully withdrew", "finally showing on my", "hit my account",
+    "landed in my wallet",
+]
+
 WEAK_SIGNALS = [
     "airdrop", "referral", "affiliate", "cashback", "bonus", "giveaway",
     "side hustle", "passive income", "commission", "freelance", "remote job",
@@ -51,7 +56,10 @@ EXCLUDED_TOPICS = [
     "sportsbook", "sports betting", "bet now", "free bet", "odds boost",
     "bookmaker", "betting app", "betting site", "casino bonus", "parlay",
     "wager", "moneyline", "point spread", "bet slip", "betting odds",
-    "gambling app", "online casino",
+    "gambling app", "online casino", "casino",
+    "bonus bets", "bet $", "bet365", "draftkings", "fanduel", "betmgm",
+    "caesars sportsbook", "fanatics sportsbook", "espn bet",
+    "kalshi", "polymarket", "prediction market",
 ]
 
 SOURCE_ACTIONABILITY_WEIGHT = {
@@ -72,17 +80,27 @@ def _source_weight(source):
 
 
 def score_and_categorize(item):
-    text = f"{item.get('title', '')} {item.get('snippet', '')}".lower()
+    title = item.get("title", "")
+    text = f"{title} {item.get('snippet', '')}".lower()
 
     action_hits = sum(1 for phrase in ACTION_PHRASES if phrase in text)
+    proof_hits = sum(1 for phrase in EARNING_PROOF_PHRASES if phrase in text)
     weak_hits = sum(1 for word in WEAK_SIGNALS if word in text)
     scam_hits = sum(1 for phrase in SCAM_SIGNALS if phrase in text)
     excluded_hits = sum(1 for phrase in EXCLUDED_TOPICS if phrase in text)
     has_amount = bool(_MONEY_OR_PERCENT_RE.search(text))
+    is_question = title.strip().endswith("?")
 
-    raw_score = (action_hits * 3) + (weak_hits * 1) + (2 if has_amount else 0)
+    raw_score = (
+        (action_hits * 3)
+        + (proof_hits * 4)
+        + (weak_hits * 1)
+        + (2 if has_amount else 0)
+    )
     raw_score *= _source_weight(item.get("source", ""))
     raw_score -= scam_hits * 5
+    if is_question:
+        raw_score -= 2
 
     cat_scores = {cat: 0 for cat in CATEGORY_KEYWORDS}
     for cat, kws in CATEGORY_KEYWORDS.items():
