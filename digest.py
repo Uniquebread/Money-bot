@@ -16,19 +16,22 @@ def _group_by_category(items):
     return grouped
 
 
-def build_telegram_message(items, run_time=None):
+def build_telegram_message(items, run_time=None, scanned_count=None):
     run_time = run_time or datetime.now(timezone.utc)
+    scan_line = f"Scanned {scanned_count} posts/articles \u2192 " if scanned_count is not None else ""
+
     if not items:
         return (
             f"<b>Money Bot Digest</b>\n"
             f"{run_time.strftime('%Y-%m-%d %H:%M UTC')}\n\n"
-            f"No new opportunities this run. Quiet couple of hours."
+            f"{scan_line}0 looked like a genuine, actionable opportunity this run."
         )
 
     grouped = _group_by_category(items)
     lines = [
         f"<b>\U0001F4B0 Money Bot Digest</b>",
-        f"{run_time.strftime('%Y-%m-%d %H:%M UTC')} \u2022 {len(items)} new item(s)",
+        f"{run_time.strftime('%Y-%m-%d %H:%M UTC')}",
+        f"{scan_line}{len(items)} genuine-looking new item(s)",
         "",
     ]
     for category, cat_items in grouped.items():
@@ -40,6 +43,7 @@ def build_telegram_message(items, run_time=None):
             lines.append(f"\u2022 <a href=\"{link}\">{title}</a> \u2014 <i>{source}</i>")
         lines.append("")
     lines.append("Full archive: see your GitHub Pages site.")
+    lines.append("\u26a0\ufe0f Screened by keyword rules, not a human or AI. Verify before connecting a wallet or sending funds.")
     return "\n".join(lines)
 
 
