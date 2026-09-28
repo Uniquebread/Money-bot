@@ -3,6 +3,7 @@ Orchestrates one full run of the bot.
 Run manually with:  python -u main.py
 """
 import os
+import re
 import sys
 import concurrent.futures
 from datetime import datetime, timezone
@@ -36,6 +37,27 @@ def fetch_with_timeout(source_module, timeout=SOURCE_TIMEOUT_SECONDS):
             return []
 
 
+def _normalize_title(title):
+    return re.sub(r"[^a-z0-9]+", "", title.lower())
+
+
+def dedupe_within_run(items):
+    seen_titles = set()
+    out = []
+    dropped = 0
+    for item in items:
+        norm = _normalize_title(item.get("title", ""))
+        if norm and norm in seen_titles:
+            dropped += 1
+            continue
+        if norm:
+            seen_titles.add(norm)
+        out.append(item)
+    if dropped:
+        print(f"Removed {dropped} duplicate-title item(s) within this run", flush=True)
+    return out
+
+
 def run():
     run_time = datetime.now(timezone.utc)
     print(f"=== Money Bot run started {run_time.isoformat()} ===", flush=True)
@@ -48,6 +70,7 @@ def run():
     print(f"Total raw items scanned: {scanned_count}", flush=True)
 
     all_items = [it for it in all_items if it.get("link") and it.get("title")]
+    all_items = dedupe_within_run(all_items)
 
     relevant = relevance_filter.filter_items(all_items, min_score=config.MIN_SCORE)
     print(f"Passed strict genuine-opportunity filter: {len(relevant)} of {scanned_count} scanned", flush=True)
