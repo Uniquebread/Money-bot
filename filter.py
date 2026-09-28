@@ -1,72 +1,108 @@
 """
-Scores each item for relevance to "money-making opportunities" and buckets
-it into a category for a more readable digest. Pure keyword matching - no
-external dependency, fast, and easy for you to tune the KEYWORDS dict below.
+Scores each item for whether it's a genuine, ACTIONABLE opportunity - not
+just "mentions a related word." This is the free (no-AI) replacement for
+LLM-based genuine/scam classification: it requires multiple concrete
+signals to line up together, and it aggressively penalizes known scam
+patterns, rather than matching on single generic keywords like the old
+version did (which is why it kept surfacing news ARTICLES about airdrops
+instead of actual claimable airdrops).
+
+No single approach without an LLM will be perfect - treat this as a
+much stronger noise filter, not a scam guarantee. Always verify manually
+before connecting a wallet, sending funds, or entering sensitive info
+anywhere a "genuine" item points you.
 """
 import re
 
-# category -> list of (keyword, weight)
-KEYWORDS = {
-    "Crypto & Airdrops": [
-        ("airdrop", 3), ("testnet", 2), ("staking reward", 3),
-        ("token launch", 2), ("presale", 2), ("whitelist", 1),
-        ("claim your", 2), ("crypto", 1),
-    ],
-    "Referral & Affiliate": [
-        ("referral bonus", 3), ("refer a friend", 3), ("affiliate program", 3),
-        ("commission", 1), ("referral code", 2), ("invite friends", 2),
-        ("affiliate", 1),
-    ],
-    "Cashback & Sign-up Bonuses": [
-        ("cashback", 2), ("sign-up bonus", 3), ("signup bonus", 3),
-        ("welcome bonus", 2), ("bank bonus", 2), ("credit card bonus", 2),
-    ],
-    "Freelance & Gigs": [
-        ("freelance", 2), ("remote job", 2), ("gig", 1), ("hire me", 1),
-        ("hiring", 1), ("work from home", 2), ("part-time income", 2),
-    ],
-    "General Side Income": [
-        ("side hustle", 3), ("passive income", 3), ("make money", 2),
-        ("earn extra", 2), ("get paid", 1), ("giveaway", 1),
-        ("free money", 2), ("extra income", 2),
-    ],
+CATEGORY_KEYWORDS = {
+    "Crypto & Airdrops": ["airdrop", "testnet", "token", "presale", "whitelist", "crypto", "wallet"],
+    "Referral & Affiliate": ["referral", "affiliate", "invite", "commission", "refer a friend"],
+    "Cashback & Sign-up Bonuses": ["cashback", "sign-up bonus", "signup bonus", "welcome bonus", "bank bonus"],
+    "Freelance & Gigs": ["freelance", "remote job", "gig", "hiring", "work from home"],
+    "General Side Income": ["side hustle", "passive income", "make money", "extra income"],
 }
 
-# Flatten for fast scoring
-_ALL_KEYWORDS = [
-    (cat, kw, weight)
-    for cat, kws in KEYWORDS.items()
-    for kw, weight in kws
+ACTION_PHRASES = [
+    "use code", "use my code", "referral code", "promo code",
+    "sign up with", "sign up using", "claim your", "claim now",
+    "trade $", "get $", "earn $", "instantly", "airdrop is live",
+    "airdrop live", "whitelist is open", "whitelist open",
+    "testnet reward", "limited spots", "first come first serve",
+    "deposit bonus", "welcome bonus of", "cashback of",
 ]
+
+WEAK_SIGNALS = [
+    "airdrop", "referral", "affiliate", "cashback", "bonus", "giveaway",
+    "side hustle", "passive income", "commission", "freelance", "remote job",
+]
+
+_MONEY_OR_PERCENT_RE = re.compile(r"(\$\s?\d|\d+\s?%|\d+\s?(usd|usdt|usdc))", re.IGNORECASE)
+
+SCAM_SIGNALS = [
+    "seed phrase", "private key", "send your wallet password",
+    "double your", "guaranteed profit", "guaranteed return",
+    "send eth to receive", "send btc to receive", "send crypto to receive",
+    "dm me for", "dm to claim", "act now or lose", "verify your wallet by sending",
+    "connect wallet to claim your prize", "you have been selected to receive",
+    "congratulations you won", "limited slots dm now",
+]
+
+EXCLUDED_TOPICS = [
+    "sportsbook", "sports betting", "bet now", "free bet", "odds boost",
+    "bookmaker", "betting app", "betting site", "casino bonus", "parlay",
+    "wager", "moneyline", "point spread", "bet slip", "betting odds",
+    "gambling app", "online casino",
+]
+
+SOURCE_ACTIONABILITY_WEIGHT = {
+    "reddit": 1.0,
+    "telegram": 1.0,
+    "producthunt": 0.8,
+    "medium": 0.5,
+    "google news": 0.3,
+}
+
+
+def _source_weight(source):
+    s = source.lower()
+    for key, weight in SOURCE_ACTIONABILITY_WEIGHT.items():
+        if key in s:
+            return weight
+    return 0.5
 
 
 def score_and_categorize(item):
-    """
-    Returns (score, category) for an item dict with 'title' and 'snippet'.
-    category is the KEYWORDS bucket with the highest matched weight;
-    falls back to 'General Side Income' if nothing matches but score > 0
-    is still required for inclusion (checked by caller).
-    """
     text = f"{item.get('title', '')} {item.get('snippet', '')}".lower()
-    cat_scores = {cat: 0 for cat in KEYWORDS}
 
-    for cat, kw, weight in _ALL_KEYWORDS:
-        if kw in text:
-            cat_scores[cat] += weight
+    action_hits = sum(1 for phrase in ACTION_PHRASES if phrase in text)
+    weak_hits = sum(1 for word in WEAK_SIGNALS if word in text)
+    scam_hits = sum(1 for phrase in SCAM_SIGNALS if phrase in text)
+    excluded_hits = sum(1 for phrase in EXCLUDED_TOPICS if phrase in text)
+    has_amount = bool(_MONEY_OR_PERCENT_RE.search(text))
 
+    raw_score = (action_hits * 3) + (weak_hits * 1) + (2 if has_amount else 0)
+    raw_score *= _source_weight(item.get("source", ""))
+    raw_score -= scam_hits * 5
+
+    cat_scores = {cat: 0 for cat in CATEGORY_KEYWORDS}
+    for cat, kws in CATEGORY_KEYWORDS.items():
+        cat_scores[cat] = sum(1 for kw in kws if kw in text)
     best_cat = max(cat_scores, key=cat_scores.get)
-    total_score = sum(cat_scores.values())
-    return total_score, best_cat if cat_scores[best_cat] > 0 else "General Side Income"
+    category = best_cat if cat_scores[best_cat] > 0 else "General Side Income"
+
+    should_drop = (scam_hits > 0) or (excluded_hits > 0)
+    return raw_score, category, should_drop
 
 
-def filter_items(items, min_score=1):
-    """Scores every item, drops low-relevance ones, attaches score/category."""
+def filter_items(items, min_score=4):
     out = []
     for item in items:
-        score, category = score_and_categorize(item)
+        score, category, should_drop = score_and_categorize(item)
+        if should_drop:
+            continue
         if score >= min_score:
             item = dict(item)
-            item["score"] = score
+            item["score"] = round(score, 1)
             item["category"] = category
             out.append(item)
     out.sort(key=lambda x: x["score"], reverse=True)
