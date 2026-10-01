@@ -1,7 +1,9 @@
 """
 Scores each item for whether it's a genuine, ACTIONABLE opportunity that
 someone is actually earning from - not just "mentions a related word,"
-not a discussion/question post, and not betting/gambling.
+not a discussion/question post, not betting/gambling, and not a market
+price update or general financial news that happens to contain dollar
+signs.
 
 No single approach without an LLM will be perfect - treat this as a
 much stronger noise filter, not a scam guarantee. Always verify manually
@@ -25,6 +27,8 @@ ACTION_PHRASES = [
     "airdrop live", "whitelist is open", "whitelist open",
     "testnet reward", "limited spots", "first come first serve",
     "deposit bonus", "welcome bonus of", "cashback of",
+    "deposit $", "stake your", "connect twitter", "go to launchpool",
+    "make 3 transactions", "campaign is live",
 ]
 
 EARNING_PROOF_PHRASES = [
@@ -41,6 +45,8 @@ WEAK_SIGNALS = [
 ]
 
 _MONEY_OR_PERCENT_RE = re.compile(r"(\$\s?\d|\d+\s?%|\d+\s?(usd|usdt|usdc))", re.IGNORECASE)
+
+_PRICE_TICKER_RE = re.compile(r"[A-Z]{2,6}\s*:\s*\$\s?[\d,.]+")
 
 SCAM_SIGNALS = [
     "seed phrase", "private key", "send your wallet password",
@@ -59,6 +65,8 @@ EXCLUDED_TOPICS = [
     "bonus bets", "bet $", "bet365", "draftkings", "fanduel", "betmgm",
     "caesars sportsbook", "fanatics sportsbook", "espn bet",
     "kalshi", "polymarket", "prediction market",
+    "market capitalization", "market cap", "surpassed the $",
+    "stock market", "nasdaq", "s&p 500", "russell 2000",
 ]
 
 SOURCE_ACTIONABILITY_WEIGHT = {
@@ -80,7 +88,8 @@ def _source_weight(source):
 
 def score_and_categorize(item):
     title = item.get("title", "")
-    text = f"{title} {item.get('snippet', '')}".lower()
+    raw_combined = f"{title} {item.get('snippet', '')}"
+    text = raw_combined.lower()
 
     action_hits = sum(1 for phrase in ACTION_PHRASES if phrase in text)
     proof_hits = sum(1 for phrase in EARNING_PROOF_PHRASES if phrase in text)
@@ -89,6 +98,8 @@ def score_and_categorize(item):
     excluded_hits = sum(1 for phrase in EXCLUDED_TOPICS if phrase in text)
     has_amount = bool(_MONEY_OR_PERCENT_RE.search(text))
     is_question = title.strip().endswith("?")
+    price_ticker_hits = len(_PRICE_TICKER_RE.findall(raw_combined))
+    is_price_ticker = price_ticker_hits >= 2 and action_hits == 0 and proof_hits == 0
 
     raw_score = (
         (action_hits * 3)
@@ -107,7 +118,7 @@ def score_and_categorize(item):
     best_cat = max(cat_scores, key=cat_scores.get)
     category = best_cat if cat_scores[best_cat] > 0 else "General Side Income"
 
-    should_drop = (scam_hits > 0) or (excluded_hits > 0)
+    should_drop = (scam_hits > 0) or (excluded_hits > 0) or is_price_ticker
     return raw_score, category, should_drop
 
 
