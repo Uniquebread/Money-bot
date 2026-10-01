@@ -18,11 +18,15 @@ from sources import reddit_rss, google_news_rss, producthunt_rss, telegram_chann
 
 SOURCES = [reddit_rss, google_news_rss, producthunt_rss, telegram_channels, medium_rss]
 
-SOURCE_TIMEOUT_SECONDS = 25
+SOURCE_TIMEOUTS = {
+    "sources.telegram_channels": 55,
+}
+DEFAULT_SOURCE_TIMEOUT_SECONDS = 25
 
 
-def fetch_with_timeout(source_module, timeout=SOURCE_TIMEOUT_SECONDS):
+def fetch_with_timeout(source_module):
     name = getattr(source_module, "__name__", str(source_module))
+    timeout = SOURCE_TIMEOUTS.get(name, DEFAULT_SOURCE_TIMEOUT_SECONDS)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
         future = ex.submit(source_module.fetch)
         try:
